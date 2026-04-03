@@ -70,6 +70,7 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 .bar-wrap{width:70px;height:4px;background:#f0ede8;border-radius:2px;overflow:hidden}
 .bar-fill{height:100%;border-radius:2px;background:#2d5a3d}
 .cat-amt{font-size:13px;color:#888;min-width:80px;text-align:right;font-variant-numeric:tabular-nums}
+.pct-lbl{font-size:11px;color:#bbb;min-width:34px;text-align:right}
 
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
 .b-fineco{background:#e8f0fc;color:#1a50a0}
@@ -171,7 +172,7 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
   <!-- LIST -->
   <div id="pane-list" class="hidden">
     <div class="sync-bar">
-      <span class="sync-lbl">Proton Drive:</span>
+      <span class="sync-lbl" id="sync-status">☁️ Connessione…</span>
       <button class="btn btn-ghost btn-sm" onclick="doExport()">↓ Esporta JSON</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-in').click()">↑ Importa JSON</button>
       <input type="file" id="file-in" accept=".json" class="hidden" onchange="doImport(event)">
@@ -181,18 +182,44 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 
   <!-- SUMMARY -->
   <div id="pane-summary" class="hidden">
-    <div class="month-nav">
+    <!-- Toggle mese / anno -->
+    <div class="tabs" style="margin-bottom:1rem">
+      <button class="tab active" id="sum-tab-month" onclick="setSumView('month')">Mese</button>
+      <button class="tab" id="sum-tab-year" onclick="setSumView('year')">Anno</button>
+    </div>
+    <!-- Navigazione mese -->
+    <div id="sum-month-nav" class="month-nav">
       <label class="lbl" for="sel-month">Mese</label>
       <select id="sel-month" onchange="renderSummary()"></select>
     </div>
+    <!-- Navigazione anno -->
+    <div id="sum-year-nav" class="month-nav hidden">
+      <label class="lbl" for="sel-year">Anno</label>
+      <select id="sel-year" onchange="renderYearSummary()"></select>
+    </div>
     <div id="sum-body"></div>
   </div>
+
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <script>
 var STORAGE_KEY = 'spese_v1';
 var expenses = [];
 var deferredPrompt = null;
+var currentTab = 'add';
+var sumView = 'month';
+var db = null;
+
+var firebaseConfig = {
+  apiKey: "AIzaSyBtuJg2AhxUJDrkkMY693Sg5MKcCZYr3bY",
+  authDomain: "spese-app-189b1.firebaseapp.com",
+  projectId: "spese-app-189b1",
+  storageBucket: "spese-app-189b1.firebasestorage.app",
+  messagingSenderId: "399300562167",
+  appId: "1:399300562167:web:95fb3dc605dcb3b766d7f2"
+};
 
 var CAT_DOT = {
   'Tasse':'d-tasse','Viaggi':'d-viaggi','Casa':'d-casa','Sport':'d-sport',
@@ -236,6 +263,44 @@ function saveData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
 }
 
+function setSyncStatus(msg) {
+  var el = document.getElementById('sync-status');
+  if (el) el.textContent = msg;
+}
+
+function initFirebase() {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    // Abilita persistenza offline
+    db.enablePersistence({synchronizeTabs: true}).catch(function(err) {
+      console.log('Persistenza non disponibile:', err.code);
+    });
+    setSyncStatus('☁️ Connessione…');
+    db.collection('expenses').onSnapshot(function(snapshot) {
+      expenses = [];
+      snapshot.forEach(function(doc) {
+        expenses.push(doc.data());
+      });
+      expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+      saveData(); // cache locale
+      setSyncStatus('☁️ Sincronizzato');
+      // Aggiorna la vista corrente
+      if (currentTab==='list') renderList();
+      if (currentTab==='summary') {
+        if (sumView==='month') { fillMonthSelect(); renderSummary(); }
+        else { fillYearSelect(); renderYearSummary(); }
+      }
+    }, function(error) {
+      console.error('Firebase error:', error);
+      setSyncStatus('⚠️ Modalità offline');
+    });
+  } catch(e) {
+    console.error('Firebase init error:', e);
+    setSyncStatus('⚠️ Errore connessione');
+  }
+}
+
 function todayISO() {
   var d = new Date();
   var mm = String(d.getMonth()+1).padStart(2,'0');
@@ -262,23 +327,38 @@ function esc(s) {
 }
 
 function init() {
-  loadData();
+  loadData(); // caricamento rapido da localStorage
   document.getElementById('f-date').value = todayISO();
   var now = new Date();
   document.getElementById('hdate').textContent = now.toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(function(e){ console.log('SW error',e); });
   }
+  initFirebase();
 }
 
 function showTab(name) {
+  currentTab = name;
   var panes = ['add','list','summary'];
   for (var i = 0; i < panes.length; i++) {
     document.getElementById('pane-'+panes[i]).classList.toggle('hidden', panes[i]!==name);
     document.getElementById('tab-btn-'+panes[i]).classList.toggle('active', panes[i]===name);
   }
   if (name==='list') renderList();
-  if (name==='summary') { fillMonthSelect(); renderSummary(); }
+  if (name==='summary') {
+    if (sumView==='month') { fillMonthSelect(); renderSummary(); }
+    else { fillYearSelect(); renderYearSummary(); }
+  }
+}
+
+function setSumView(v) {
+  sumView = v;
+  document.getElementById('sum-tab-month').classList.toggle('active', v==='month');
+  document.getElementById('sum-tab-year').classList.toggle('active', v==='year');
+  document.getElementById('sum-month-nav').classList.toggle('hidden', v!=='month');
+  document.getElementById('sum-year-nav').classList.toggle('hidden', v!=='year');
+  if (v==='month') { fillMonthSelect(); renderSummary(); }
+  else { fillYearSelect(); renderYearSummary(); }
 }
 
 function addExpense() {
@@ -293,15 +373,36 @@ function addExpense() {
   if (!amountRaw || isNaN(amount) || amount<=0) { alert('Inserisci un importo valido.'); return; }
   if (!date) { alert('Inserisci una data.'); return; }
 
-  expenses.push({id:Date.now(),name:name,amount:amount,date:date,cat:cat,pay:pay});
-  expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
-  saveData();
-  resetForm();
-
+  var id = Date.now();
+  var expense = {id:id, name:name, amount:amount, date:date, cat:cat, pay:pay};
   var btn = document.getElementById('save-btn');
-  btn.textContent = '✓ Salvata!';
-  btn.style.background = '#1e7040';
-  setTimeout(function(){ btn.textContent='Salva spesa'; btn.style.background=''; }, 1800);
+  btn.disabled = true;
+
+  if (db) {
+    db.collection('expenses').doc(String(id)).set(expense)
+      .then(function() {
+        resetForm();
+        btn.disabled = false;
+        btn.textContent = '✓ Salvata!';
+        btn.style.background = '#1e7040';
+        setTimeout(function(){ btn.textContent='Salva spesa'; btn.style.background=''; }, 1800);
+      })
+      .catch(function(e) {
+        console.error('Save error:', e);
+        alert('Errore nel salvataggio. Riprova.');
+        btn.disabled = false;
+      });
+  } else {
+    // Fallback localStorage
+    expenses.push(expense);
+    expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+    saveData();
+    resetForm();
+    btn.disabled = false;
+    btn.textContent = '✓ Salvata!';
+    btn.style.background = '#1e7040';
+    setTimeout(function(){ btn.textContent='Salva spesa'; btn.style.background=''; }, 1800);
+  }
 }
 
 function resetForm() {
@@ -312,9 +413,15 @@ function resetForm() {
 
 function deleteExpense(id) {
   if (!confirm('Eliminare questa spesa?')) return;
-  expenses = expenses.filter(function(e){ return e.id!==id; });
-  saveData();
-  renderList();
+  if (db) {
+    db.collection('expenses').doc(String(id)).delete()
+      .catch(function(e) { console.error('Delete error:', e); alert('Errore durante l\'eliminazione.'); });
+    // onSnapshot aggiornerà automaticamente la lista
+  } else {
+    expenses = expenses.filter(function(e){ return e.id!==id; });
+    saveData();
+    renderList();
+  }
 }
 
 function renderList() {
@@ -368,6 +475,23 @@ function fillMonthSelect() {
   if (prev&&all.indexOf(prev)!==-1) sel.value=prev;
 }
 
+function fillYearSelect() {
+  var sel=document.getElementById('sel-year');
+  var prev=sel.value;
+  var years=[];
+  for (var i=0;i<expenses.length;i++) {
+    var y=expenses[i].date.slice(0,4);
+    if (years.indexOf(y)===-1) years.push(y);
+  }
+  years.sort(function(a,b){ return a<b?1:-1; });
+  var curY=String(new Date().getFullYear());
+  if (years.indexOf(curY)===-1) years.unshift(curY);
+  var opts='';
+  for (var i=0;i<years.length;i++) opts+='<option value="'+years[i]+'">'+years[i]+'</option>';
+  sel.innerHTML=opts;
+  if (prev&&years.indexOf(prev)!==-1) sel.value=prev;
+}
+
 function renderSummary() {
   var m=document.getElementById('sel-month').value;
   var el=document.getElementById('sum-body');
@@ -375,10 +499,11 @@ function renderSummary() {
   if (!data.length) { el.innerHTML='<div class="empty">Nessuna spesa per '+monthLabel(m)+'.</div>'; return; }
   var total=0;
   for (var i=0;i<data.length;i++) total+=data[i].amount;
-  var byCat={}, byPay={};
+  var byCat={}, byPay={}, byPayCount={};
   for (var i=0;i<data.length;i++) {
     byCat[data[i].cat]=(byCat[data[i].cat]||0)+data[i].amount;
     byPay[data[i].pay]=(byPay[data[i].pay]||0)+data[i].amount;
+    byPayCount[data[i].pay]=(byPayCount[data[i].pay]||0)+1;
   }
   var cats=[]; for (var c in byCat) cats.push([c,byCat[c]]);
   cats.sort(function(a,b){ return b[1]-a[1]; });
@@ -395,8 +520,10 @@ function renderSummary() {
   }
   var payRows='';
   for (var i=0;i<pays.length;i++) {
+    var pct=Math.round(byPayCount[pays[i][0]]/data.length*100);
     payRows+='<div class="cat-row">'+
       '<div class="cat-name"><span class="badge '+(PAY_BADGE[pays[i][0]]||'')+'">'+esc(pays[i][0])+'</span></div>'+
+      '<div class="pct-lbl">'+pct+'%</div>'+
       '<div class="cat-amt">'+fmtMoney(pays[i][1])+'</div></div>';
   }
   el.innerHTML=
@@ -409,6 +536,62 @@ function renderSummary() {
     '<div style="display:flex;justify-content:flex-end">'+
       '<button class="btn btn-ghost btn-sm" onclick="exportMonth(\''+m+'\')">↓ Scarica riepilogo '+monthLabel(m)+'</button>'+
     '</div>';
+}
+
+function renderYearSummary() {
+  var y=document.getElementById('sel-year').value;
+  var el=document.getElementById('sum-body');
+  var data=expenses.filter(function(e){ return e.date.slice(0,4)===y; });
+  if (!data.length) { el.innerHTML='<div class="empty">Nessuna spesa per il '+y+'.</div>'; return; }
+  var total=0;
+  for (var i=0;i<data.length;i++) total+=data[i].amount;
+  var byMonth={}, byCat={}, byPay={}, byPayCount={};
+  for (var i=0;i<data.length;i++) {
+    var mk=monthKey(data[i].date);
+    byMonth[mk]=(byMonth[mk]||0)+data[i].amount;
+    byCat[data[i].cat]=(byCat[data[i].cat]||0)+data[i].amount;
+    byPay[data[i].pay]=(byPay[data[i].pay]||0)+data[i].amount;
+    byPayCount[data[i].pay]=(byPayCount[data[i].pay]||0)+1;
+  }
+  var months=Object.keys(byMonth).sort();
+  var maxMonth=0;
+  for (var i=0;i<months.length;i++) if (byMonth[months[i]]>maxMonth) maxMonth=byMonth[months[i]];
+  var monthRows='';
+  for (var i=0;i<months.length;i++) {
+    monthRows+='<div class="cat-row">'+
+      '<div class="cat-name">'+monthLabel(months[i])+'</div>'+
+      '<div class="bar-wrap"><div class="bar-fill" style="width:'+Math.round(byMonth[months[i]]/maxMonth*100)+'%"></div></div>'+
+      '<div class="cat-amt">'+fmtMoney(byMonth[months[i]])+'</div></div>';
+  }
+  var cats=[]; for (var c in byCat) cats.push([c,byCat[c]]);
+  cats.sort(function(a,b){ return b[1]-a[1]; });
+  var pays=[]; for (var p in byPay) pays.push([p,byPay[p]]);
+  pays.sort(function(a,b){ return b[1]-a[1]; });
+  var maxCat=cats[0][1];
+  var catRows='';
+  for (var i=0;i<cats.length;i++) {
+    catRows+='<div class="cat-row">'+
+      '<div class="dot '+(CAT_DOT[cats[i][0]]||'d-altro')+'"></div>'+
+      '<div class="cat-name">'+esc(cats[i][0])+'</div>'+
+      '<div class="bar-wrap"><div class="bar-fill" style="width:'+Math.round(cats[i][1]/maxCat*100)+'%"></div></div>'+
+      '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div></div>';
+  }
+  var payRows='';
+  for (var i=0;i<pays.length;i++) {
+    var pct=Math.round(byPayCount[pays[i][0]]/data.length*100);
+    payRows+='<div class="cat-row">'+
+      '<div class="cat-name"><span class="badge '+(PAY_BADGE[pays[i][0]]||'')+'">'+esc(pays[i][0])+'</span></div>'+
+      '<div class="pct-lbl">'+pct+'%</div>'+
+      '<div class="cat-amt">'+fmtMoney(pays[i][1])+'</div></div>';
+  }
+  el.innerHTML=
+    '<div class="sum-grid">'+
+      '<div class="stat"><div class="stat-lbl">Totale '+y+'</div><div class="stat-val">'+fmtMoney(total)+'</div></div>'+
+      '<div class="stat"><div class="stat-lbl">Transazioni</div><div class="stat-val">'+data.length+'</div></div>'+
+    '</div>'+
+    '<div class="card" style="margin-bottom:1rem"><div class="sec-lbl">Per mese</div>'+monthRows+'</div>'+
+    '<div class="card" style="margin-bottom:1rem"><div class="sec-lbl">Per categoria</div>'+catRows+'</div>'+
+    '<div class="card" style="margin-bottom:1rem"><div class="sec-lbl">Per metodo di pagamento</div>'+payRows+'</div>';
 }
 
 function exportMonth(m) {
@@ -444,7 +627,27 @@ function doImport(ev) {
       var imp=JSON.parse(e.target.result);
       if (!Array.isArray(imp)) throw new Error();
       if (!confirm('Importare '+imp.length+' spese? I '+expenses.length+' record attuali verranno sostituiti.')) return;
-      expenses=imp; saveData(); alert('Importazione completata: '+imp.length+' spese caricate.');
+      if (db) {
+        var delPromises=expenses.map(function(exp){
+          return db.collection('expenses').doc(String(exp.id)).delete();
+        });
+        Promise.all(delPromises).then(function(){
+          var batch=db.batch();
+          imp.forEach(function(exp){
+            var ref=db.collection('expenses').doc(String(exp.id));
+            batch.set(ref,exp);
+          });
+          return batch.commit();
+        }).then(function(){
+          alert('Importazione completata: '+imp.length+' spese caricate.');
+        }).catch(function(err){
+          console.error('Import error:',err);
+          alert('Errore durante l\'importazione.');
+        });
+      } else {
+        expenses=imp; saveData();
+        alert('Importazione completata: '+imp.length+' spese caricate.');
+      }
     } catch(err){ alert('File JSON non valido.'); }
   };
   r.readAsText(file);
