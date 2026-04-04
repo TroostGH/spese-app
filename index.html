@@ -87,6 +87,11 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 .d-medico{background:#5080c0}.d-altro{background:#909090}
 
 .empty{text-align:center;padding:3rem 1rem;color:#bbb;font-size:14px}
+.search-bar{position:relative;margin-bottom:1rem}
+.search-bar input{width:100%;padding:11px 12px 11px 38px;border:1.5px solid #ddd8d0;border-radius:10px;font-family:inherit;font-size:15px;color:#1a1814;background:#fff;outline:none;transition:border-color .15s}
+.search-bar input:focus{border-color:#2d5a3d}
+.search-bar input::placeholder{color:#bbb}
+.search-bar .search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#bbb;font-size:16px;pointer-events:none}
 .hidden{display:none!important}
 .month-nav{display:flex;align-items:center;gap:10px;margin-bottom:1.25rem}
 .month-nav select{max-width:240px;font-size:15px}
@@ -163,6 +168,7 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
         </div>
       </div>
       <div class="actions">
+        <button class="btn btn-ghost" id="cancel-edit-btn" onclick="cancelEdit()" class="hidden" style="display:none">Annulla modifica</button>
         <button class="btn btn-ghost" onclick="resetForm()">Pulisci</button>
         <button class="btn btn-primary" id="save-btn" onclick="addExpense()">Salva spesa</button>
       </div>
@@ -176,6 +182,10 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
       <button class="btn btn-ghost btn-sm" onclick="doExport()">↓ Esporta JSON</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-in').click()">↑ Importa JSON</button>
       <input type="file" id="file-in" accept=".json" class="hidden" onchange="doImport(event)">
+    </div>
+    <div class="search-bar">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="Cerca spesa…" autocomplete="off" oninput="renderList()">
     </div>
     <div id="list-body"></div>
   </div>
@@ -211,6 +221,7 @@ var deferredPrompt = null;
 var currentTab = 'add';
 var sumView = 'month';
 var db = null;
+var editingId = null;
 
 var firebaseConfig = {
   apiKey: "AIzaSyBtuJg2AhxUJDrkkMY693Sg5MKcCZYr3bY",
@@ -282,7 +293,7 @@ function initFirebase() {
       snapshot.forEach(function(doc) {
         expenses.push(doc.data());
       });
-      expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+      expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
       saveData(); // cache locale
       setSyncStatus('☁️ Sincronizzato');
       // Aggiorna la vista corrente
@@ -361,6 +372,31 @@ function setSumView(v) {
   else { fillYearSelect(); renderYearSummary(); }
 }
 
+function editExpense(id) {
+  var exp = null;
+  for (var i = 0; i < expenses.length; i++) {
+    if (expenses[i].id === id) { exp = expenses[i]; break; }
+  }
+  if (!exp) return;
+  editingId = id;
+  document.getElementById('f-name').value = exp.name;
+  document.getElementById('f-amount').value = exp.amount;
+  document.getElementById('f-date').value = exp.date;
+  document.getElementById('f-cat').value = exp.cat;
+  document.getElementById('f-pay').value = exp.pay;
+  document.getElementById('save-btn').textContent = 'Aggiorna spesa';
+  document.getElementById('cancel-edit-btn').style.display = '';
+  showTab('add');
+  document.getElementById('f-name').focus();
+}
+
+function cancelEdit() {
+  editingId = null;
+  document.getElementById('save-btn').textContent = 'Salva spesa';
+  document.getElementById('cancel-edit-btn').style.display = 'none';
+  resetForm();
+}
+
 function addExpense() {
   var name = document.getElementById('f-name').value.trim();
   var amountRaw = document.getElementById('f-amount').value;
@@ -373,10 +409,47 @@ function addExpense() {
   if (!amountRaw || isNaN(amount) || amount<=0) { alert('Inserisci un importo valido.'); return; }
   if (!date) { alert('Inserisci una data.'); return; }
 
-  var id = Date.now();
-  var expense = {id:id, name:name, amount:amount, date:date, cat:cat, pay:pay};
   var btn = document.getElementById('save-btn');
   btn.disabled = true;
+
+  if (editingId) {
+    // Modalità modifica
+    var updated = {id:editingId, name:name, amount:amount, date:date, cat:cat, pay:pay};
+    if (db) {
+      db.collection('expenses').doc(String(editingId)).set(updated)
+        .then(function() {
+          editingId = null;
+          resetForm();
+          btn.disabled = false;
+          btn.textContent = '✓ Aggiornata!';
+          btn.style.background = '#1e7040';
+          document.getElementById('cancel-edit-btn').style.display = 'none';
+          setTimeout(function(){ btn.textContent='Salva spesa'; btn.style.background=''; }, 1800);
+        })
+        .catch(function(e) {
+          console.error('Update error:', e);
+          alert('Errore nell\'aggiornamento. Riprova.');
+          btn.disabled = false;
+        });
+    } else {
+      for (var i = 0; i < expenses.length; i++) {
+        if (expenses[i].id === editingId) { expenses[i] = updated; break; }
+      }
+      expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
+      saveData();
+      editingId = null;
+      resetForm();
+      btn.disabled = false;
+      btn.textContent = '✓ Aggiornata!';
+      btn.style.background = '#1e7040';
+      document.getElementById('cancel-edit-btn').style.display = 'none';
+      setTimeout(function(){ btn.textContent='Salva spesa'; btn.style.background=''; }, 1800);
+    }
+    return;
+  }
+
+  var id = Date.now();
+  var expense = {id:id, name:name, amount:amount, date:date, cat:cat, pay:pay};
 
   if (db) {
     db.collection('expenses').doc(String(id)).set(expense)
@@ -395,7 +468,7 @@ function addExpense() {
   } else {
     // Fallback localStorage
     expenses.push(expense);
-    expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+    expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
     saveData();
     resetForm();
     btn.disabled = false;
@@ -409,6 +482,11 @@ function resetForm() {
   document.getElementById('f-name').value = '';
   document.getElementById('f-amount').value = '';
   document.getElementById('f-date').value = todayISO();
+  if (editingId) {
+    editingId = null;
+    document.getElementById('save-btn').textContent = 'Salva spesa';
+    document.getElementById('cancel-edit-btn').style.display = 'none';
+  }
 }
 
 function deleteExpense(id) {
@@ -427,28 +505,42 @@ function deleteExpense(id) {
 function renderList() {
   var el = document.getElementById('list-body');
   if (!expenses.length) { el.innerHTML='<div class="empty">Nessuna spesa ancora registrata.</div>'; return; }
+  var searchEl = document.getElementById('search-input');
+  var query = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  var filtered = expenses;
+  if (query) {
+    filtered = expenses.filter(function(e) {
+      return e.name.toLowerCase().indexOf(query) !== -1 ||
+             e.cat.toLowerCase().indexOf(query) !== -1 ||
+             e.pay.toLowerCase().indexOf(query) !== -1 ||
+             fmtDateIT(e.date).indexOf(query) !== -1 ||
+             String(e.amount).indexOf(query) !== -1;
+    });
+  }
+  if (!filtered.length) { el.innerHTML='<div class="empty">'+(query?'Nessun risultato per "'+esc(query)+'".' : 'Nessuna spesa ancora registrata.')+'</div>'; return; }
   var groups = {};
-  for (var i=0;i<expenses.length;i++) {
-    var m = monthKey(expenses[i].date);
+  for (var i=0;i<filtered.length;i++) {
+    var m = monthKey(filtered[i].date);
     if (!groups[m]) groups[m]=[];
-    groups[m].push(expenses[i]);
+    groups[m].push(filtered[i]);
   }
   var keys = Object.keys(groups).sort(function(a,b){ return a<b?1:-1; });
   var html = '';
   for (var k=0;k<keys.length;k++) {
     var m = keys[k], list = groups[m], tot=0;
+    list.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
     for (var j=0;j<list.length;j++) tot+=list[j].amount;
     var rows='';
     for (var j=0;j<list.length;j++) {
       var e=list[j];
-      rows+='<div class="exp-row">'+
+      rows+='<div class="exp-row" onclick="editExpense('+e.id+')" style="cursor:pointer">'+
         '<div class="dot '+(CAT_DOT[e.cat]||'d-altro')+'"></div>'+
         '<div class="exp-info">'+
           '<div class="exp-name">'+esc(e.name)+'</div>'+
           '<div class="exp-meta">'+fmtDateIT(e.date)+' &middot; '+esc(e.cat)+' &middot; <span class="badge '+(PAY_BADGE[e.pay]||'')+'">'+esc(e.pay)+'</span></div>'+
         '</div>'+
         '<div class="exp-amt">'+fmtMoney(e.amount)+'</div>'+
-        '<button class="del-btn" onclick="deleteExpense('+e.id+')" title="Elimina">&times;</button>'+
+        '<button class="del-btn" onclick="event.stopPropagation();deleteExpense('+e.id+')" title="Elimina">&times;</button>'+
       '</div>';
     }
     html+='<div class="month-block">'+
