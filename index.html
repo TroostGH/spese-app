@@ -97,6 +97,21 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 .month-nav select{max-width:240px;font-size:15px}
 .month-nav .lbl{white-space:nowrap;margin-bottom:0}
 
+/* Export modal */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center;padding:1rem}
+.modal{background:#fff;border-radius:16px;padding:1.5rem;max-width:380px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.15)}
+.modal h3{font-size:1.1rem;font-weight:500;margin-bottom:1rem}
+.modal-options{display:flex;flex-direction:column;gap:8px;margin-bottom:1rem}
+.modal-opt{padding:12px 14px;border:1.5px solid #ddd8d0;border-radius:10px;background:#f9f7f4;font-family:inherit;font-size:14px;cursor:pointer;text-align:left;transition:all .15s;color:#1a1814}
+.modal-opt:active,.modal-opt.selected{border-color:#2d5a3d;background:#eef5f0}
+.modal-date-range{display:none;gap:10px;margin-bottom:1rem}
+.modal-date-range.visible{display:flex}
+.modal-date-range label{flex:1}
+.modal-date-range .lbl{font-size:11px;font-weight:600;color:#888;margin-bottom:5px;letter-spacing:.5px;text-transform:uppercase;display:block}
+.modal-date-range input{width:100%;padding:10px 12px;border:1.5px solid #ddd8d0;border-radius:8px;font-family:inherit;font-size:15px;color:#1a1814;background:#f9f7f4;outline:none;-webkit-appearance:none;appearance:none}
+.modal-date-range input:focus{border-color:#2d5a3d;background:#fff}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px}
+
 /* Install banner */
 #install-bar{background:#2d5a3d;color:#fff;padding:12px 16px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:1.25rem;font-size:14px}
 #install-bar button{background:rgba(255,255,255,.2);color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
@@ -188,6 +203,28 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
       <input type="text" id="search-input" placeholder="Cerca spesa…" autocomplete="off" oninput="renderList()">
     </div>
     <div id="list-body"></div>
+  </div>
+
+  <!-- EXPORT MODAL -->
+  <div id="export-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeExportModal()">
+    <div class="modal">
+      <h3>Esporta spese</h3>
+      <div class="modal-options" id="export-month-list"></div>
+      <div class="modal-date-range" id="export-date-range">
+        <label>
+          <span class="lbl">Da</span>
+          <input type="date" id="export-from">
+        </label>
+        <label>
+          <span class="lbl">A</span>
+          <input type="date" id="export-to">
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeExportModal()">Annulla</button>
+        <button class="btn btn-primary" id="export-confirm-btn" onclick="confirmExport()">Esporta</button>
+      </div>
+    </div>
   </div>
 
   <!-- SUMMARY -->
@@ -702,13 +739,71 @@ function exportMonth(m) {
   URL.revokeObjectURL(a.href);
 }
 
+var exportSelection = null; // 'all', '2026-04', or 'custom'
+
 function doExport() {
-  var blob=new Blob([JSON.stringify(expenses,null,2)],{type:'application/json'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='spese_'+todayISO()+'.json';
+  exportSelection = null;
+  // Costruisci lista mesi disponibili
+  var months = [];
+  for (var i = 0; i < expenses.length; i++) {
+    var m = monthKey(expenses[i].date);
+    if (months.indexOf(m) === -1) months.push(m);
+  }
+  months.sort(function(a,b){ return a < b ? 1 : -1; });
+  var html = '<button class="modal-opt" onclick="selectExportOption(\'all\',this)">📋 Tutte le spese</button>';
+  for (var i = 0; i < months.length; i++) {
+    html += '<button class="modal-opt" onclick="selectExportOption(\'' + months[i] + '\',this)">' + monthLabel(months[i]) + '</button>';
+  }
+  html += '<button class="modal-opt" onclick="selectExportOption(\'custom\',this)">📅 Personalizzato…</button>';
+  document.getElementById('export-month-list').innerHTML = html;
+  document.getElementById('export-date-range').classList.remove('visible');
+  document.getElementById('export-from').value = '';
+  document.getElementById('export-to').value = '';
+  document.getElementById('export-modal').classList.remove('hidden');
+}
+
+function selectExportOption(val, btn) {
+  exportSelection = val;
+  var opts = document.getElementById('export-month-list').querySelectorAll('.modal-opt');
+  for (var i = 0; i < opts.length; i++) opts[i].classList.remove('selected');
+  btn.classList.add('selected');
+  if (val === 'custom') {
+    document.getElementById('export-date-range').classList.add('visible');
+  } else {
+    document.getElementById('export-date-range').classList.remove('visible');
+  }
+}
+
+function closeExportModal() {
+  document.getElementById('export-modal').classList.add('hidden');
+}
+
+function confirmExport() {
+  if (!exportSelection) { alert('Seleziona un periodo da esportare.'); return; }
+  var data;
+  var filename;
+  if (exportSelection === 'all') {
+    data = expenses;
+    filename = 'spese_tutte_' + todayISO() + '.json';
+  } else if (exportSelection === 'custom') {
+    var from = document.getElementById('export-from').value;
+    var to = document.getElementById('export-to').value;
+    if (!from || !to) { alert('Inserisci entrambe le date.'); return; }
+    if (from > to) { alert('La data iniziale deve essere prima di quella finale.'); return; }
+    data = expenses.filter(function(e) { return e.date >= from && e.date <= to; });
+    filename = 'spese_' + from + '_' + to + '.json';
+  } else {
+    data = expenses.filter(function(e) { return monthKey(e.date) === exportSelection; });
+    filename = 'spese_' + exportSelection + '.json';
+  }
+  if (!data.length) { alert('Nessuna spesa nel periodo selezionato.'); return; }
+  var blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
+  closeExportModal();
 }
 
 function doImport(ev) {
