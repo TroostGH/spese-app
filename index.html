@@ -250,6 +250,7 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <script>
 var STORAGE_KEY = 'spese_v1';
@@ -319,29 +320,36 @@ function setSyncStatus(msg) {
 function initFirebase() {
   try {
     firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
-    // Abilita persistenza offline
-    db.enablePersistence({synchronizeTabs: true}).catch(function(err) {
-      console.log('Persistenza non disponibile:', err.code);
-    });
-    setSyncStatus('☁️ Connessione…');
-    db.collection('expenses').onSnapshot(function(snapshot) {
-      expenses = [];
-      snapshot.forEach(function(doc) {
-        expenses.push(doc.data());
+    setSyncStatus('☁️ Autenticazione…');
+    // Login anonimo: senza questo le regole di sicurezza Firestore rifiutano le richieste
+    firebase.auth().signInAnonymously().then(function() {
+      db = firebase.firestore();
+      // Abilita persistenza offline
+      db.enablePersistence({synchronizeTabs: true}).catch(function(err) {
+        console.log('Persistenza non disponibile:', err.code);
       });
-      expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
-      saveData(); // cache locale
-      setSyncStatus('☁️ Sincronizzato');
-      // Aggiorna la vista corrente
-      if (currentTab==='list') renderList();
-      if (currentTab==='summary') {
-        if (sumView==='month') { fillMonthSelect(); renderSummary(); }
-        else { fillYearSelect(); renderYearSummary(); }
-      }
-    }, function(error) {
-      console.error('Firebase error:', error);
-      setSyncStatus('⚠️ Modalità offline');
+      setSyncStatus('☁️ Connessione…');
+      db.collection('expenses').onSnapshot(function(snapshot) {
+        expenses = [];
+        snapshot.forEach(function(doc) {
+          expenses.push(doc.data());
+        });
+        expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
+        saveData(); // cache locale
+        setSyncStatus('☁️ Sincronizzato');
+        // Aggiorna la vista corrente
+        if (currentTab==='list') renderList();
+        if (currentTab==='summary') {
+          if (sumView==='month') { fillMonthSelect(); renderSummary(); }
+          else { fillYearSelect(); renderYearSummary(); }
+        }
+      }, function(error) {
+        console.error('Firebase error:', error);
+        setSyncStatus('⚠️ Modalità offline');
+      });
+    }).catch(function(err) {
+      console.error('Auth error:', err);
+      setSyncStatus('⚠️ Errore autenticazione');
     });
   } catch(e) {
     console.error('Firebase init error:', e);
