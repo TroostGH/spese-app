@@ -125,7 +125,10 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
     <button onclick="installApp()">Installa</button>
   </div>
 
-  <h1>Le mie spese</h1>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+    <h1>Le mie spese</h1>
+    <button id="settings-btn" onclick="openSettings()" title="Impostazioni" aria-label="Impostazioni" style="background:transparent;border:none;font-size:22px;cursor:pointer;padding:6px 4px;line-height:1;-webkit-tap-highlight-color:transparent">⚙️</button>
+  </div>
   <div class="sub" id="hdate"></div>
 
   <div class="tabs">
@@ -152,34 +155,11 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
         </div>
         <div>
           <label class="lbl" for="f-cat">Categoria</label>
-          <select id="f-cat">
-            <option value="Tasse">Tasse</option>
-            <option value="Viaggi">Viaggi</option>
-            <option value="Casa">Casa</option>
-            <option value="Sport">Sport</option>
-            <option value="Regali">Regali</option>
-            <option value="Spesa" selected>Spesa</option>
-            <option value="Sfizi e Tecnologia">Sfizi e Tecnologia</option>
-            <option value="Auto">Auto</option>
-            <option value="Shopping">Shopping</option>
-            <option value="Formazione">Formazione</option>
-            <option value="Bar e Ristoranti">Bar e Ristoranti</option>
-            <option value="Lavoro">Lavoro</option>
-            <option value="Trasporti">Trasporti</option>
-            <option value="Intrattenimento">Intrattenimento</option>
-            <option value="Medico">Medico</option>
-            <option value="Altro">Altro</option>
-          </select>
+          <select id="f-cat"></select>
         </div>
         <div>
           <label class="lbl" for="f-pay">Pagamento</label>
-          <select id="f-pay">
-            <option value="Fineco">Fineco</option>
-            <option value="Amex">Amex</option>
-            <option value="Revolut">Revolut</option>
-            <option value="N26">N26</option>
-            <option value="Contanti">Contanti</option>
-          </select>
+          <select id="f-pay"></select>
         </div>
       </div>
       <div class="actions">
@@ -227,6 +207,32 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
     </div>
   </div>
 
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeSettings()">
+    <div class="modal" style="max-width:440px">
+      <h3>Impostazioni</h3>
+      <div style="margin-bottom:1.25rem">
+        <div class="sec-lbl" style="margin-bottom:8px">Categorie</div>
+        <div id="cat-list"></div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <input type="text" id="new-cat-name" placeholder="Nuova categoria…" maxlength="40" autocomplete="off" style="flex:1">
+          <button class="btn btn-primary btn-sm" onclick="addCategory()">+ Aggiungi</button>
+        </div>
+      </div>
+      <div style="margin-bottom:1.25rem">
+        <div class="sec-lbl" style="margin-bottom:8px">Metodi di pagamento</div>
+        <div id="pay-list"></div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <input type="text" id="new-pay-name" placeholder="Nuovo metodo…" maxlength="30" autocomplete="off" style="flex:1">
+          <button class="btn btn-primary btn-sm" onclick="addPayment()">+ Aggiungi</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeSettings()">Chiudi</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SUMMARY -->
   <div id="pane-summary" class="hidden">
     <!-- Toggle mese / anno -->
@@ -270,16 +276,82 @@ var firebaseConfig = {
   appId: "1:399300562167:web:95fb3dc605dcb3b766d7f2"
 };
 
-var CAT_DOT = {
-  'Tasse':'d-tasse','Viaggi':'d-viaggi','Casa':'d-casa','Sport':'d-sport',
-  'Regali':'d-regali','Spesa':'d-spesa','Sfizi e Tecnologia':'d-sfizi',
-  'Auto':'d-auto','Shopping':'d-shopping','Formazione':'d-formazione',
-  'Bar e Ristoranti':'d-bar','Lavoro':'d-lavoro','Trasporti':'d-trasporti',
-  'Intrattenimento':'d-intrattenimento','Medico':'d-medico','Altro':'d-altro'
-};
-var PAY_BADGE = {
-  'Fineco':'b-fineco','Amex':'b-amex','Revolut':'b-revolut','N26':'b-n26','Contanti':'b-contanti'
-};
+var DEFAULT_CATEGORIES = [
+  {name:'Tasse', color:'#c47a3a'},
+  {name:'Viaggi', color:'#4a7fb5'},
+  {name:'Casa', color:'#7a9e5a'},
+  {name:'Sport', color:'#d45e3a'},
+  {name:'Regali', color:'#b05090'},
+  {name:'Spesa', color:'#5aa08a'},
+  {name:'Sfizi e Tecnologia', color:'#8060b0'},
+  {name:'Auto', color:'#607080'},
+  {name:'Shopping', color:'#d08040'},
+  {name:'Formazione', color:'#3090a0'},
+  {name:'Bar e Ristoranti', color:'#c05050'},
+  {name:'Lavoro', color:'#4060a0'},
+  {name:'Trasporti', color:'#507050'},
+  {name:'Intrattenimento', color:'#a050a0'},
+  {name:'Medico', color:'#5080c0'},
+  {name:'Altro', color:'#909090'}
+];
+var DEFAULT_PAYMENTS = [
+  {name:'Fineco', bg:'#e8f0fc', fg:'#1a50a0'},
+  {name:'Amex', bg:'#faf3e0', fg:'#806010'},
+  {name:'Revolut', bg:'#f0e8fc', fg:'#5010a0'},
+  {name:'N26', bg:'#e8f8ec', fg:'#106030'},
+  {name:'Contanti', bg:'#f0ede8', fg:'#605040'}
+];
+var CAT_PALETTE = ['#c47a3a','#4a7fb5','#7a9e5a','#d45e3a','#b05090','#5aa08a','#8060b0','#607080','#d08040','#3090a0','#c05050','#4060a0','#507050','#a050a0','#5080c0','#6a8e3a','#3a8e6a','#8e3a6a','#3a6a8e','#8e6a3a','#bf6f8f','#6fbf8f','#8fbf6f','#6f8fbf'];
+var PAY_PALETTE = [
+  {bg:'#e8f0fc', fg:'#1a50a0'},
+  {bg:'#faf3e0', fg:'#806010'},
+  {bg:'#f0e8fc', fg:'#5010a0'},
+  {bg:'#e8f8ec', fg:'#106030'},
+  {bg:'#fce8e8', fg:'#a02020'},
+  {bg:'#fcf3e8', fg:'#a06010'},
+  {bg:'#e8f8fc', fg:'#106080'},
+  {bg:'#f0ede8', fg:'#605040'}
+];
+var CONFIG_KEY = 'spese_config_v1';
+var CONFIG_DOC_ID = '__settings__';
+var categories = DEFAULT_CATEGORIES.slice();
+var payments = DEFAULT_PAYMENTS.slice();
+
+function findCat(name) {
+  for (var i=0;i<categories.length;i++) if (categories[i].name===name) return categories[i];
+  return null;
+}
+function findPay(name) {
+  for (var i=0;i<payments.length;i++) if (payments[i].name===name) return payments[i];
+  return null;
+}
+function catColor(name) {
+  var c = findCat(name); return c ? c.color : '#909090';
+}
+function payStyle(name) {
+  var p = findPay(name);
+  if (p) return 'background:'+p.bg+';color:'+p.fg;
+  return 'background:#f0ede8;color:#605040';
+}
+function autoCatColor() {
+  var used = {};
+  for (var i=0;i<categories.length;i++) used[categories[i].color] = 1;
+  for (var i=0;i<CAT_PALETTE.length;i++) if (!used[CAT_PALETTE[i]]) return CAT_PALETTE[i];
+  var hue = (categories.length * 47) % 360;
+  return 'hsl('+hue+',55%,50%)';
+}
+function autoPayColors() {
+  var used = {};
+  for (var i=0;i<payments.length;i++) used[payments[i].bg] = 1;
+  for (var i=0;i<PAY_PALETTE.length;i++) if (!used[PAY_PALETTE[i].bg]) return PAY_PALETTE[i];
+  return PAY_PALETTE[payments.length % PAY_PALETTE.length];
+}
+function ensureAltro() {
+  if (!findCat('Altro')) categories.push({name:'Altro', color:'#909090'});
+}
+function jsStr(s) {
+  return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
 var MONTHS = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
 window.addEventListener('beforeinstallprompt', function(e) {
@@ -331,9 +403,20 @@ function initFirebase() {
       setSyncStatus('☁️ Connessione…');
       db.collection('expenses').onSnapshot(function(snapshot) {
         expenses = [];
+        var configFromDb = null;
         snapshot.forEach(function(doc) {
-          expenses.push(doc.data());
+          var d = doc.data();
+          if (doc.id === CONFIG_DOC_ID || (d && d._isConfig)) { configFromDb = d; return; }
+          expenses.push(d);
         });
+        if (configFromDb) {
+          if (Array.isArray(configFromDb.categories) && configFromDb.categories.length) categories = configFromDb.categories;
+          if (Array.isArray(configFromDb.payments) && configFromDb.payments.length) payments = configFromDb.payments;
+          ensureAltro();
+          try { localStorage.setItem(CONFIG_KEY, JSON.stringify({categories:categories, payments:payments})); } catch(_e){}
+          populateSelects();
+          if (document.getElementById('settings-modal') && !document.getElementById('settings-modal').classList.contains('hidden')) renderSettings();
+        }
         expenses.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
         saveData(); // cache locale
         setSyncStatus('☁️ Sincronizzato');
@@ -384,6 +467,8 @@ function esc(s) {
 
 function init() {
   loadData(); // caricamento rapido da localStorage
+  loadConfig(); // categorie e metodi di pagamento personalizzati
+  populateSelects();
   document.getElementById('f-date').value = todayISO();
   var now = new Date();
   document.getElementById('hdate').textContent = now.toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
@@ -579,10 +664,10 @@ function renderList() {
     for (var j=0;j<list.length;j++) {
       var e=list[j];
       rows+='<div class="exp-row" onclick="editExpense('+e.id+')" style="cursor:pointer">'+
-        '<div class="dot '+(CAT_DOT[e.cat]||'d-altro')+'"></div>'+
+        '<div class="dot" style="background:'+catColor(e.cat)+'"></div>'+
         '<div class="exp-info">'+
           '<div class="exp-name">'+esc(e.name)+'</div>'+
-          '<div class="exp-meta">'+fmtDateIT(e.date)+' &middot; '+esc(e.cat)+' &middot; <span class="badge '+(PAY_BADGE[e.pay]||'')+'">'+esc(e.pay)+'</span></div>'+
+          '<div class="exp-meta">'+fmtDateIT(e.date)+' &middot; '+esc(e.cat)+' &middot; <span class="badge" style="'+payStyle(e.pay)+'">'+esc(e.pay)+'</span></div>'+
         '</div>'+
         '<div class="exp-amt">'+fmtMoney(e.amount)+'</div>'+
         '<button class="del-btn" onclick="event.stopPropagation();deleteExpense('+e.id+')" title="Elimina">&times;</button>'+
@@ -650,7 +735,7 @@ function renderSummary() {
   var catRows='';
   for (var i=0;i<cats.length;i++) {
     catRows+='<div class="cat-row">'+
-      '<div class="dot '+(CAT_DOT[cats[i][0]]||'d-altro')+'"></div>'+
+      '<div class="dot" style="background:'+catColor(cats[i][0])+'"></div>'+
       '<div class="cat-name">'+esc(cats[i][0])+'</div>'+
       '<div class="bar-wrap"><div class="bar-fill" style="width:'+Math.round(cats[i][1]/maxCat*100)+'%"></div></div>'+
       '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div></div>';
@@ -659,7 +744,7 @@ function renderSummary() {
   for (var i=0;i<pays.length;i++) {
     var pct=Math.round(byPayCount[pays[i][0]]/data.length*100);
     payRows+='<div class="cat-row">'+
-      '<div class="cat-name"><span class="badge '+(PAY_BADGE[pays[i][0]]||'')+'">'+esc(pays[i][0])+'</span></div>'+
+      '<div class="cat-name"><span class="badge" style="'+payStyle(pays[i][0])+'">'+esc(pays[i][0])+'</span></div>'+
       '<div class="pct-lbl">'+pct+'%</div>'+
       '<div class="cat-amt">'+fmtMoney(pays[i][1])+'</div></div>';
   }
@@ -708,7 +793,7 @@ function renderYearSummary() {
   var catRows='';
   for (var i=0;i<cats.length;i++) {
     catRows+='<div class="cat-row">'+
-      '<div class="dot '+(CAT_DOT[cats[i][0]]||'d-altro')+'"></div>'+
+      '<div class="dot" style="background:'+catColor(cats[i][0])+'"></div>'+
       '<div class="cat-name">'+esc(cats[i][0])+'</div>'+
       '<div class="bar-wrap"><div class="bar-fill" style="width:'+Math.round(cats[i][1]/maxCat*100)+'%"></div></div>'+
       '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div></div>';
@@ -717,7 +802,7 @@ function renderYearSummary() {
   for (var i=0;i<pays.length;i++) {
     var pct=Math.round(byPayCount[pays[i][0]]/data.length*100);
     payRows+='<div class="cat-row">'+
-      '<div class="cat-name"><span class="badge '+(PAY_BADGE[pays[i][0]]||'')+'">'+esc(pays[i][0])+'</span></div>'+
+      '<div class="cat-name"><span class="badge" style="'+payStyle(pays[i][0])+'">'+esc(pays[i][0])+'</span></div>'+
       '<div class="pct-lbl">'+pct+'%</div>'+
       '<div class="cat-amt">'+fmtMoney(pays[i][1])+'</div></div>';
   }
@@ -847,6 +932,207 @@ function doImport(ev) {
   };
   r.readAsText(file);
   ev.target.value='';
+}
+
+function populateSelects() {
+  var fc = document.getElementById('f-cat');
+  if (fc) {
+    var prev = fc.value || 'Spesa';
+    var html = '';
+    for (var i=0;i<categories.length;i++) {
+      html += '<option value="'+esc(categories[i].name)+'">'+esc(categories[i].name)+'</option>';
+    }
+    fc.innerHTML = html;
+    if (findCat(prev)) fc.value = prev;
+    else if (findCat('Spesa')) fc.value = 'Spesa';
+  }
+  var fp = document.getElementById('f-pay');
+  if (fp) {
+    var prevP = fp.value || (payments[0] && payments[0].name);
+    var html2 = '';
+    for (var i=0;i<payments.length;i++) {
+      html2 += '<option value="'+esc(payments[i].name)+'">'+esc(payments[i].name)+'</option>';
+    }
+    fp.innerHTML = html2;
+    if (prevP && findPay(prevP)) fp.value = prevP;
+  }
+}
+
+function loadConfig() {
+  try {
+    var raw = localStorage.getItem(CONFIG_KEY);
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.categories) && parsed.categories.length) categories = parsed.categories;
+      if (parsed && Array.isArray(parsed.payments) && parsed.payments.length) payments = parsed.payments;
+    }
+  } catch(e) {}
+  ensureAltro();
+}
+
+function saveConfig() {
+  ensureAltro();
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify({categories:categories, payments:payments})); } catch(_e){}
+  if (db) {
+    var data = {_isConfig:true, categories:categories, payments:payments};
+    db.collection('expenses').doc(CONFIG_DOC_ID).set(data).catch(function(e){
+      console.error('Errore salvataggio config:', e);
+    });
+  }
+}
+
+function openSettings() {
+  renderSettings();
+  document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.add('hidden');
+  var nc = document.getElementById('new-cat-name'); if (nc) nc.value = '';
+  var np = document.getElementById('new-pay-name'); if (np) np.value = '';
+}
+
+function renderSettings() {
+  var catEl = document.getElementById('cat-list');
+  var html = '';
+  for (var i=0;i<categories.length;i++) {
+    var c = categories[i];
+    var locked = (c.name === 'Altro');
+    html += '<div class="cat-row" style="border-top:'+(i===0?'none':'1px solid #f0ede8')+';padding:9px 0">'+
+      '<div class="dot" style="background:'+c.color+'"></div>'+
+      '<div class="cat-name">'+esc(c.name)+'</div>'+
+      (locked ? '<span style="font-size:11px;color:#bbb">default</span>' :
+        '<button class="del-btn" onclick="removeCategory(\''+jsStr(c.name)+'\')" title="Rimuovi">&times;</button>') +
+    '</div>';
+  }
+  catEl.innerHTML = html;
+
+  var payEl = document.getElementById('pay-list');
+  html = '';
+  for (var i=0;i<payments.length;i++) {
+    var p = payments[i];
+    var lockedP = (payments.length <= 1);
+    html += '<div class="cat-row" style="border-top:'+(i===0?'none':'1px solid #f0ede8')+';padding:9px 0">'+
+      '<div class="cat-name"><span class="badge" style="background:'+p.bg+';color:'+p.fg+'">'+esc(p.name)+'</span></div>'+
+      (lockedP ? '<span style="font-size:11px;color:#bbb">ultimo</span>' :
+        '<button class="del-btn" onclick="removePayment(\''+jsStr(p.name)+'\')" title="Rimuovi">&times;</button>') +
+    '</div>';
+  }
+  payEl.innerHTML = html;
+}
+
+function addCategory() {
+  var input = document.getElementById('new-cat-name');
+  var name = input.value.trim();
+  if (!name) { alert('Inserisci un nome.'); return; }
+  if (name.length > 40) { alert('Nome troppo lungo (max 40 caratteri).'); return; }
+  if (findCat(name)) { alert('Categoria già esistente.'); return; }
+  categories.push({name:name, color:autoCatColor()});
+  input.value = '';
+  saveConfig();
+  populateSelects();
+  renderSettings();
+  refreshViews();
+}
+
+function removeCategory(name) {
+  if (name === 'Altro') return;
+  if (!findCat(name)) return;
+  var count = 0;
+  for (var i=0;i<expenses.length;i++) if (expenses[i].cat === name) count++;
+  var msg = 'Rimuovere la categoria "'+name+'"?';
+  if (count > 0) msg += '\n\n'+count+' '+(count===1?'spesa verrà riassegnata':'spese verranno riassegnate')+' a "Altro".';
+  if (!confirm(msg)) return;
+  if (count > 0) reassignCategory(name, 'Altro');
+  categories = categories.filter(function(c){ return c.name !== name; });
+  ensureAltro();
+  saveConfig();
+  populateSelects();
+  renderSettings();
+  refreshViews();
+}
+
+function addPayment() {
+  var input = document.getElementById('new-pay-name');
+  var name = input.value.trim();
+  if (!name) { alert('Inserisci un nome.'); return; }
+  if (name.length > 30) { alert('Nome troppo lungo (max 30 caratteri).'); return; }
+  if (findPay(name)) { alert('Metodo già esistente.'); return; }
+  var cols = autoPayColors();
+  payments.push({name:name, bg:cols.bg, fg:cols.fg});
+  input.value = '';
+  saveConfig();
+  populateSelects();
+  renderSettings();
+  refreshViews();
+}
+
+function removePayment(name) {
+  if (payments.length <= 1) return;
+  var fallback = null;
+  for (var i=0;i<payments.length;i++) {
+    if (payments[i].name !== name) { fallback = payments[i].name; break; }
+  }
+  if (!fallback) return;
+  var count = 0;
+  for (var i=0;i<expenses.length;i++) if (expenses[i].pay === name) count++;
+  var msg = 'Rimuovere il metodo di pagamento "'+name+'"?';
+  if (count > 0) msg += '\n\n'+count+' '+(count===1?'spesa verrà riassegnata':'spese verranno riassegnate')+' a "'+fallback+'".';
+  if (!confirm(msg)) return;
+  if (count > 0) reassignPayment(name, fallback);
+  payments = payments.filter(function(p){ return p.name !== name; });
+  saveConfig();
+  populateSelects();
+  renderSettings();
+  refreshViews();
+}
+
+function reassignCategory(oldName, newName) {
+  var toUpdate = [];
+  for (var i=0;i<expenses.length;i++) {
+    if (expenses[i].cat === oldName) {
+      expenses[i].cat = newName;
+      toUpdate.push(expenses[i]);
+    }
+  }
+  if (db && toUpdate.length) {
+    var batch = db.batch();
+    for (var i=0;i<toUpdate.length;i++) {
+      var exp = toUpdate[i];
+      batch.set(db.collection('expenses').doc(String(exp.id)), {id:exp.id, name:exp.name, amount:exp.amount, date:exp.date, cat:exp.cat, pay:exp.pay});
+    }
+    batch.commit().catch(function(e){ console.error('Errore riassegnazione categoria:', e); });
+  } else {
+    saveData();
+  }
+}
+
+function reassignPayment(oldName, newName) {
+  var toUpdate = [];
+  for (var i=0;i<expenses.length;i++) {
+    if (expenses[i].pay === oldName) {
+      expenses[i].pay = newName;
+      toUpdate.push(expenses[i]);
+    }
+  }
+  if (db && toUpdate.length) {
+    var batch = db.batch();
+    for (var i=0;i<toUpdate.length;i++) {
+      var exp = toUpdate[i];
+      batch.set(db.collection('expenses').doc(String(exp.id)), {id:exp.id, name:exp.name, amount:exp.amount, date:exp.date, cat:exp.cat, pay:exp.pay});
+    }
+    batch.commit().catch(function(e){ console.error('Errore riassegnazione pagamento:', e); });
+  } else {
+    saveData();
+  }
+}
+
+function refreshViews() {
+  if (currentTab==='list') renderList();
+  if (currentTab==='summary') {
+    if (sumView==='month') renderSummary();
+    else renderYearSummary();
+  }
 }
 
 init();
