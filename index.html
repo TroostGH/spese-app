@@ -818,13 +818,7 @@ function renderYearSummary() {
 
 function exportMonth(m) {
   var data=expenses.filter(function(e){ return monthKey(e.date)===m; });
-  var payload={
-    mese: monthLabel(m),
-    chiave: m,
-    totale: data.reduce(function(s,e){ return s+e.amount; },0),
-    spese: data
-  };
-  var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   var a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download='spese_'+m+'.json';
