@@ -116,12 +116,11 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 #install-bar{background:#2d5a3d;color:#fff;padding:12px 16px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:1.25rem;font-size:14px}
 #install-bar button{background:rgba(255,255,255,.2);color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
 
-/* Swipe tra schermate */
-@keyframes swipeInL{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
-@keyframes swipeInR{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:none}}
-.swipe-in-left{animation:swipeInL .22s ease-out}
-.swipe-in-right{animation:swipeInR .22s ease-out}
+/* Carosello schermate */
 body{overflow-x:hidden}
+#pager{margin:0 -1.25rem;overflow:hidden;overflow:clip;touch-action:pan-y;transition:height .28s ease}
+#track{display:flex;align-items:flex-start;will-change:transform}
+.pane{flex:0 0 100%;width:100%;padding:0 1.25rem;min-width:0}
 </style>
 </head>
 <body>
@@ -144,8 +143,9 @@ body{overflow-x:hidden}
     <button class="tab" id="tab-btn-summary" onclick="showTab('summary')">Riepilogo</button>
   </div>
 
+  <div id="pager"><div id="track">
   <!-- ADD -->
-  <div id="pane-add">
+  <div id="pane-add" class="pane">
     <div class="card">
       <div class="grid2">
         <div class="full">
@@ -178,7 +178,7 @@ body{overflow-x:hidden}
   </div>
 
   <!-- LIST -->
-  <div id="pane-list" class="hidden">
+  <div id="pane-list" class="pane">
     <div class="sync-bar">
       <span class="sync-lbl" id="sync-status">☁️ Connessione…</span>
       <button class="btn btn-ghost btn-sm" onclick="doExport()">↓ Esporta JSON</button>
@@ -191,6 +191,27 @@ body{overflow-x:hidden}
     </div>
     <div id="list-body"></div>
   </div>
+
+  <!-- SUMMARY -->
+  <div id="pane-summary" class="pane">
+    <!-- Toggle mese / anno -->
+    <div class="tabs" style="margin-bottom:1rem">
+      <button class="tab active" id="sum-tab-month" onclick="setSumView('month')">Mese</button>
+      <button class="tab" id="sum-tab-year" onclick="setSumView('year')">Anno</button>
+    </div>
+    <!-- Navigazione mese -->
+    <div id="sum-month-nav" class="month-nav">
+      <label class="lbl" for="sel-month">Mese</label>
+      <select id="sel-month" onchange="renderSummary()"></select>
+    </div>
+    <!-- Navigazione anno -->
+    <div id="sum-year-nav" class="month-nav hidden">
+      <label class="lbl" for="sel-year">Anno</label>
+      <select id="sel-year" onchange="renderYearSummary()"></select>
+    </div>
+    <div id="sum-body"></div>
+  </div>
+  </div></div>
 
   <!-- EXPORT MODAL -->
   <div id="export-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeExportModal()">
@@ -238,26 +259,6 @@ body{overflow-x:hidden}
         <button class="btn btn-primary" onclick="closeSettings()">Chiudi</button>
       </div>
     </div>
-  </div>
-
-  <!-- SUMMARY -->
-  <div id="pane-summary" class="hidden">
-    <!-- Toggle mese / anno -->
-    <div class="tabs" style="margin-bottom:1rem">
-      <button class="tab active" id="sum-tab-month" onclick="setSumView('month')">Mese</button>
-      <button class="tab" id="sum-tab-year" onclick="setSumView('year')">Anno</button>
-    </div>
-    <!-- Navigazione mese -->
-    <div id="sum-month-nav" class="month-nav">
-      <label class="lbl" for="sel-month">Mese</label>
-      <select id="sel-month" onchange="renderSummary()"></select>
-    </div>
-    <!-- Navigazione anno -->
-    <div id="sum-year-nav" class="month-nav hidden">
-      <label class="lbl" for="sel-year">Anno</label>
-      <select id="sel-year" onchange="renderYearSummary()"></select>
-    </div>
-    <div id="sum-body"></div>
   </div>
 
 </div>
@@ -389,6 +390,7 @@ function loadData() {
 
 function saveData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+  if (typeof markStale === 'function') markStale();
 }
 
 function setSyncStatus(msg) {
@@ -485,53 +487,127 @@ function init() {
   initFirebase();
 }
 
-function showTab(name) {
-  currentTab = name;
-  var panes = ['add','list','summary'];
-  for (var i = 0; i < panes.length; i++) {
-    document.getElementById('pane-'+panes[i]).classList.toggle('hidden', panes[i]!==name);
-    document.getElementById('tab-btn-'+panes[i]).classList.toggle('active', panes[i]===name);
-  }
+var TAB_ORDER = ['add','list','summary'];
+var pager = null, track = null, swiping = false, heightTimer = null, preTimer = null;
+var paneStale = {add:false, list:true, summary:true};
+
+// Le pagine vengono preparate in anticipo (a riposo), così lo swipe non deve aspettare
+function markStale() { paneStale.list = paneStale.summary = true; schedulePrerender(); }
+function schedulePrerender() {
+  clearTimeout(preTimer);
+  preTimer = setTimeout(function() {
+    if (swiping) { schedulePrerender(); return; }
+    for (var i = 0; i < TAB_ORDER.length; i++) {
+      var n = TAB_ORDER[i];
+      if (!paneStale[n]) continue;
+      if (n === currentTab) paneStale[n] = false; // la pagina visibile è già aggiornata dal resto del codice
+      else renderPane(n);
+    }
+    if (!swiping) fitHeight();
+  }, 400);
+}
+
+function renderPane(name) {
+  paneStale[name] = false;
   if (name==='list') renderList();
   if (name==='summary') {
     if (sumView==='month') { fillMonthSelect(); renderSummary(); }
     else { fillYearSelect(); renderYearSummary(); }
   }
 }
-
-// --- Swipe orizzontale tra le tre schermate ---
-var TAB_ORDER = ['add','list','summary'];
-function swipeTo(dir) {
-  var idx = TAB_ORDER.indexOf(currentTab) + dir;
-  if (idx < 0 || idx >= TAB_ORDER.length) return;
-  var name = TAB_ORDER[idx];
-  showTab(name);
-  var pane = document.getElementById('pane-'+name);
-  pane.classList.remove('swipe-in-left','swipe-in-right');
-  void pane.offsetWidth; // riavvia l'animazione
-  pane.classList.add(dir > 0 ? 'swipe-in-left' : 'swipe-in-right');
+function setTrack(px, animate) {
+  track.style.transition = animate ? 'transform .3s cubic-bezier(.2,.8,.2,1)' : 'none';
+  track.style.transform = 'translate3d(' + px + 'px,0,0)';
 }
-(function setupSwipe() {
-  var sx = 0, sy = 0, st = 0, tracking = false;
-  document.addEventListener('touchstart', function(e) {
-    tracking = false;
+function paneH(name) { return document.getElementById('pane-'+name).offsetHeight; }
+function fitHeight() { if (pager) pager.style.height = paneH(currentTab) + 'px'; }
+
+function showTab(name, noAnim) {
+  var prev = currentTab;
+  currentTab = name;
+  for (var i = 0; i < TAB_ORDER.length; i++) {
+    document.getElementById('tab-btn-'+TAB_ORDER[i]).classList.toggle('active', TAB_ORDER[i]===name);
+  }
+  if (!pager) { renderPane(name); return; }
+  setTrack(-TAB_ORDER.indexOf(name) * pager.clientWidth, !noAnim);
+  if (paneStale[name]) renderPane(name);
+  // durante la transizione tiene l'altezza della pagina più alta, poi si adatta
+  pager.style.height = Math.max(paneH(prev), paneH(name)) + 'px';
+  clearTimeout(heightTimer);
+  heightTimer = setTimeout(fitHeight, noAnim ? 0 : 320);
+  var tabs = document.querySelector('.tabs');
+  if (prev !== name && window.scrollY > tabs.offsetTop) window.scrollTo({top: tabs.offsetTop - 10, behavior: 'smooth'});
+}
+
+// --- Swipe che segue il dito ---
+(function setupPager() {
+  pager = document.getElementById('pager');
+  track = document.getElementById('track');
+  var sx, sy, idx, W, lock, lastX, lastT, vel;
+
+  function reset() { swiping = false; lock = null; }
+  window.addEventListener('resize', function() { setTrack(-TAB_ORDER.indexOf(currentTab) * pager.clientWidth, false); fitHeight(); });
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(function() { if (!swiping) fitHeight(); });
+    for (var i = 0; i < TAB_ORDER.length; i++) ro.observe(document.getElementById('pane-'+TAB_ORDER[i]));
+  }
+
+  pager.addEventListener('touchstart', function(e) {
+    reset();
     if (e.touches.length !== 1) return;
     var t = e.target;
-    // niente swipe dentro campi, menu a tendina o finestre modali
-    if (t.closest && t.closest('input,select,textarea,.modal-overlay')) return;
-    if (document.querySelector('.modal-overlay:not(.hidden)')) return;
-    sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now();
-    tracking = true;
+    if (t.closest && t.closest('select,textarea,input[type=range]')) return;
+    if (t === document.activeElement && t.tagName === 'INPUT') return;
+    sx = lastX = e.touches[0].clientX; sy = e.touches[0].clientY;
+    lastT = Date.now(); vel = 0; lock = 'pending';
   }, {passive: true});
-  document.addEventListener('touchend', function(e) {
-    if (!tracking) return;
-    tracking = false;
-    var dx = e.changedTouches[0].clientX - sx;
-    var dy = e.changedTouches[0].clientY - sy;
-    // solo gesti chiaramente orizzontali e abbastanza decisi
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - st > 800) return;
-    swipeTo(dx < 0 ? 1 : -1);
-  }, {passive: true});
+
+  pager.addEventListener('touchmove', function(e) {
+    if (!lock) return;
+    var x = e.touches[0].clientX, y = e.touches[0].clientY;
+    var dx = x - sx, dy = y - sy;
+    if (lock === 'pending') {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dx) <= Math.abs(dy)) { lock = null; return; } // scorrimento verticale: lascio fare al browser
+      lock = 'h'; swiping = true;
+      idx = TAB_ORDER.indexOf(currentTab); W = pager.clientWidth;
+      clearTimeout(heightTimer);
+      // mostra anche le pagine vicine (già pronte) mentre scorrono
+      var h = paneH(currentTab);
+      if (idx > 0) h = Math.max(h, paneH(TAB_ORDER[idx-1]));
+      if (idx < TAB_ORDER.length-1) h = Math.max(h, paneH(TAB_ORDER[idx+1]));
+      pager.style.height = h + 'px';
+      sx = x; dx = 0; // parte da dove il dito ha "agganciato"
+    }
+    if (e.cancelable) e.preventDefault();
+    var now = Date.now(), dt = now - lastT;
+    if (dt > 0) vel = 0.7 * ((x - lastX) / dt) + 0.3 * vel;
+    lastX = x; lastT = now;
+    var off = dx;
+    if ((idx === 0 && dx > 0) || (idx === TAB_ORDER.length-1 && dx < 0)) off = dx * 0.3; // resistenza ai bordi
+    setTrack(-idx * W + off, false);
+  }, {passive: false});
+
+  function end(cancel) {
+    if (!swiping) { reset(); return; }
+    var dx = lastX - sx;
+    if (Date.now() - lastT > 120) vel = 0; // dito fermo prima di staccare
+    var target = idx;
+    if (!cancel) {
+      var reversing = (vel > 0.25 && dx < 0) || (vel < -0.25 && dx > 0);
+      if (!reversing) {
+        if (dx < 0 && (dx < -W * 0.3 || (vel < -0.4 && dx < -20))) target = idx + 1;
+        if (dx > 0 && (dx >  W * 0.3 || (vel >  0.4 && dx >  20))) target = idx - 1;
+      }
+      target = Math.max(0, Math.min(TAB_ORDER.length-1, target));
+    }
+    reset();
+    showTab(TAB_ORDER[target]);
+  }
+  pager.addEventListener('touchend', function() { end(false); });
+  pager.addEventListener('touchcancel', function() { end(true); });
+  showTab(currentTab, true);
+  schedulePrerender();
 })();
 
 function setSumView(v) {
@@ -1164,6 +1240,7 @@ function reassignPayment(oldName, newName) {
 }
 
 function refreshViews() {
+  markStale();
   if (currentTab==='list') renderList();
   if (currentTab==='summary') {
     if (sumView==='month') renderSummary();
