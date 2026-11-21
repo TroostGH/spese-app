@@ -1,9 +1,9 @@
-var CACHE = 'spese-v4';
-var ASSETS = ['/', '/index.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
+var CACHE = 'spese-v5';
+var ASSETS = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', function(e) {
   e.waitUntil(
-    caches.open(CACHE).then(function(c) { return c.addAll(ASSETS); })
+    caches.open(CACHE).then(function(c) { return c.addAll(ASSETS); }).catch(function() {})
   );
   self.skipWaiting();
 });
@@ -17,10 +17,20 @@ self.addEventListener('activate', function(e) {
   self.clients.claim();
 });
 
+// Rete prima (così gli aggiornamenti arrivano subito), cache solo se offline
 self.addEventListener('fetch', function(e) {
+  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
-    caches.match(e.request).then(function(cached) {
-      return cached || fetch(e.request).catch(function() { return caches.match('/index.html'); });
+    fetch(e.request).then(function(res) {
+      if (res && res.ok) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function(c) { c.put(e.request, copy); });
+      }
+      return res;
+    }).catch(function() {
+      return caches.match(e.request).then(function(cached) {
+        return cached || caches.match('./index.html');
+      });
     })
   );
 });
