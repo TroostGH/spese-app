@@ -118,7 +118,8 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 
 /* Carosello schermate */
 body{overflow-x:hidden}
-#pager{margin:0 -1.25rem;overflow:hidden;overflow:clip;touch-action:pan-y;transition:height .28s ease}
+html,body{touch-action:pan-y pinch-zoom}
+#pager{margin:0 -1.25rem;overflow:hidden;overflow:clip;transition:height .28s ease}
 #track{display:flex;align-items:flex-start;will-change:transform}
 .pane{flex:0 0 100%;width:100%;padding:0 1.25rem;min-width:0}
 </style>
@@ -552,17 +553,19 @@ function showTab(name, noAnim) {
     for (var i = 0; i < TAB_ORDER.length; i++) ro.observe(document.getElementById('pane-'+TAB_ORDER[i]));
   }
 
-  pager.addEventListener('touchstart', function(e) {
+  // Lo swipe funziona su tutto lo schermo, non solo sopra il contenuto della pagina
+  document.addEventListener('touchstart', function(e) {
     reset();
     if (e.touches.length !== 1) return;
     var t = e.target;
-    if (t.closest && t.closest('select,textarea,input[type=range]')) return;
-    if (t === document.activeElement && t.tagName === 'INPUT') return;
+    if (document.querySelector('.modal-overlay:not(.hidden)')) return; // finestre aperte
+    if (t.closest && t.closest('textarea,input[type=range]')) return;
+    if (t === document.activeElement && t.tagName === 'INPUT') return; // campo in cui stai scrivendo
     sx = lastX = e.touches[0].clientX; sy = e.touches[0].clientY;
     lastT = Date.now(); vel = 0; lock = 'pending';
   }, {passive: true});
 
-  pager.addEventListener('touchmove', function(e) {
+  document.addEventListener('touchmove', function(e) {
     if (!lock) return;
     var x = e.touches[0].clientX, y = e.touches[0].clientY;
     var dx = x - sx, dy = y - sy;
@@ -570,6 +573,8 @@ function showTab(name, noAnim) {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       if (Math.abs(dx) <= Math.abs(dy)) { lock = null; return; } // scorrimento verticale: lascio fare al browser
       lock = 'h'; swiping = true;
+      var ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) ae.blur(); // chiude la tastiera
       idx = TAB_ORDER.indexOf(currentTab); W = pager.clientWidth;
       clearTimeout(heightTimer);
       // mostra anche le pagine vicine (già pronte) mentre scorrono
@@ -604,8 +609,8 @@ function showTab(name, noAnim) {
     reset();
     showTab(TAB_ORDER[target]);
   }
-  pager.addEventListener('touchend', function() { end(false); });
-  pager.addEventListener('touchcancel', function() { end(true); });
+  document.addEventListener('touchend', function() { end(false); });
+  document.addEventListener('touchcancel', function() { end(true); });
   showTab(currentTab, true);
   schedulePrerender();
 })();
