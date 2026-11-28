@@ -119,9 +119,35 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,select:fo
 /* Carosello schermate */
 body{overflow-x:hidden}
 html,body{touch-action:pan-y pinch-zoom}
-#pager{margin:0 -1.25rem;overflow:hidden;overflow:clip;transition:height .28s ease}
+#pager{margin:0 -1.25rem;overflow:hidden;overflow:clip}
 #track{display:flex;align-items:flex-start;will-change:transform}
-.pane{flex:0 0 100%;width:100%;padding:0 1.25rem;min-width:0}
+.pane{flex:0 0 100%;width:100%;padding:0 1.25rem;min-width:0;contain:layout paint}
+
+/* Indicatore delle schede che scorre insieme alle pagine */
+#main-tabs{position:relative}
+#main-tabs .tab{position:relative;z-index:1;background:transparent;box-shadow:none;transition:color .2s}
+#tab-ind{position:absolute;top:3px;bottom:3px;left:0;width:0;border-radius:8px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.1);will-change:transform;pointer-events:none}
+
+/* Categorie cliccabili nel riepilogo */
+.cat-row.clickable{cursor:pointer;-webkit-tap-highlight-color:transparent;margin:0 -8px;padding-left:8px;padding-right:8px;border-radius:8px;transition:background .12s}
+.cat-row.clickable:active{background:#f4f1ec}
+.cat-chev{color:#c8c2b8;font-size:18px;line-height:1;margin-left:-2px}
+
+/* Pannello dal basso (bottom sheet) */
+.sheet-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:200;visibility:hidden;pointer-events:none;transition:visibility 0s linear .4s}
+.sheet-overlay.open{visibility:visible;pointer-events:auto;transition:none}
+.sheet-backdrop{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.42);opacity:0;transition:opacity .32s ease}
+.sheet-overlay.open .sheet-backdrop{opacity:1}
+.sheet{position:absolute;left:0;right:0;bottom:0;margin:0 auto;max-width:820px;max-height:85vh;max-height:85dvh;background:#f4f1ec;border-radius:20px 20px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;transform:translate3d(0,100%,0);transition:transform .36s cubic-bezier(.25,.9,.3,1);will-change:transform;padding-bottom:env(safe-area-inset-bottom)}
+.sheet-overlay.open .sheet{transform:translate3d(0,0,0)}
+.sheet-head{flex-shrink:0;padding:10px 1.25rem 14px;touch-action:none;cursor:grab}
+.sheet-grip{width:42px;height:5px;border-radius:3px;background:#cfc8bd;margin:0 auto 14px}
+.sheet-title-row{display:flex;align-items:center;gap:10px}
+.sheet-title-row .dot{width:10px;height:10px}
+.sheet-title{flex:1;min-width:0;font-size:1.25rem;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-tot{font-size:1.1rem;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sheet-sub{font-size:13px;color:#888;margin-top:3px;padding-left:20px}
+.sheet-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 1.25rem 1.5rem}
 </style>
 </head>
 <body>
@@ -138,7 +164,8 @@ html,body{touch-action:pan-y pinch-zoom}
   </div>
   <div class="sub" id="hdate"></div>
 
-  <div class="tabs">
+  <div class="tabs" id="main-tabs">
+    <div id="tab-ind"></div>
     <button class="tab active" id="tab-btn-add" onclick="showTab('add')">+ Aggiungi</button>
     <button class="tab" id="tab-btn-list" onclick="showTab('list')">Elenco</button>
     <button class="tab" id="tab-btn-summary" onclick="showTab('summary')">Riepilogo</button>
@@ -262,6 +289,23 @@ html,body{touch-action:pan-y pinch-zoom}
     </div>
   </div>
 
+</div>
+
+<!-- PANNELLO CATEGORIA -->
+<div id="cat-sheet" class="sheet-overlay" aria-hidden="true">
+  <div class="sheet-backdrop" id="cs-backdrop" onclick="closeCatSheet()"></div>
+  <div class="sheet" id="cs-panel" role="dialog" aria-modal="true" aria-labelledby="cs-title">
+    <div class="sheet-head">
+      <div class="sheet-grip"></div>
+      <div class="sheet-title-row">
+        <span class="dot" id="cs-dot"></span>
+        <div class="sheet-title" id="cs-title"></div>
+        <div class="sheet-tot" id="cs-tot"></div>
+      </div>
+      <div class="sheet-sub" id="cs-sub"></div>
+    </div>
+    <div class="sheet-body" id="cs-body"></div>
+  </div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -493,7 +537,7 @@ var pager = null, track = null, swiping = false, heightTimer = null, preTimer = 
 var paneStale = {add:false, list:true, summary:true};
 
 // Le pagine vengono preparate in anticipo (a riposo), così lo swipe non deve aspettare
-function markStale() { paneStale.list = paneStale.summary = true; schedulePrerender(); }
+function markStale() { paneStale.list = paneStale.summary = true; schedulePrerender(); if (typeof catSheet !== 'undefined' && catSheet.open) renderCatSheet(); }
 function schedulePrerender() {
   clearTimeout(preTimer);
   preTimer = setTimeout(function() {
@@ -516,27 +560,46 @@ function renderPane(name) {
     else { fillYearSelect(); renderYearSummary(); }
   }
 }
-function setTrack(px, animate) {
-  track.style.transition = animate ? 'transform .3s cubic-bezier(.2,.8,.2,1)' : 'none';
+var SNAP_EASE = 'cubic-bezier(.25,.9,.3,1)';
+var pagerW = 0, animating = false;
+var tabInd = null, indX0 = 0, indStep = 0;
+
+function measurePager() {
+  pagerW = pager.clientWidth || 1;
+  if (!tabInd) return;
+  var b0 = document.getElementById('tab-btn-add'), b1 = document.getElementById('tab-btn-list');
+  indX0 = b0.offsetLeft; indStep = b1.offsetLeft - b0.offsetLeft;
+  tabInd.style.width = b0.offsetWidth + 'px';
+}
+// Sposta le pagine (e l'indicatore delle schede) solo con transform: lavora la GPU, niente ricalcolo della pagina
+function setTrack(px, dur) {
+  var tr = dur ? 'transform ' + dur + 'ms ' + SNAP_EASE : 'none';
+  track.style.transition = tr;
   track.style.transform = 'translate3d(' + px + 'px,0,0)';
+  if (tabInd) {
+    tabInd.style.transition = tr;
+    tabInd.style.transform = 'translate3d(' + (indX0 + (-px / pagerW) * indStep) + 'px,0,0)';
+  }
 }
 function paneH(name) { return document.getElementById('pane-'+name).offsetHeight; }
 function fitHeight() { if (pager) pager.style.height = paneH(currentTab) + 'px'; }
 
-function showTab(name, noAnim) {
+function showTab(name, noAnim, dur) {
   var prev = currentTab;
   currentTab = name;
   for (var i = 0; i < TAB_ORDER.length; i++) {
     document.getElementById('tab-btn-'+TAB_ORDER[i]).classList.toggle('active', TAB_ORDER[i]===name);
   }
   if (!pager) { renderPane(name); return; }
-  setTrack(-TAB_ORDER.indexOf(name) * pager.clientWidth, !noAnim);
   if (paneStale[name]) renderPane(name);
-  // durante la transizione tiene l'altezza della pagina più alta, poi si adatta
+  var d = noAnim ? 0 : (dur || 340);
+  // L'altezza cambia di colpo (non animata) e solo prima/dopo lo scorrimento, mai durante
   pager.style.height = Math.max(paneH(prev), paneH(name)) + 'px';
+  animating = d > 0;
+  setTrack(-TAB_ORDER.indexOf(name) * pagerW, d);
   clearTimeout(heightTimer);
-  heightTimer = setTimeout(fitHeight, noAnim ? 0 : 320);
-  var tabs = document.querySelector('.tabs');
+  heightTimer = setTimeout(function() { animating = false; if (!swiping) fitHeight(); }, d + 40);
+  var tabs = document.getElementById('main-tabs');
   if (prev !== name && window.scrollY > tabs.offsetTop) window.scrollTo({top: tabs.offsetTop - 10, behavior: 'smooth'});
 }
 
@@ -544,12 +607,18 @@ function showTab(name, noAnim) {
 (function setupPager() {
   pager = document.getElementById('pager');
   track = document.getElementById('track');
-  var sx, sy, idx, W, lock, lastX, lastT, vel;
+  tabInd = document.getElementById('tab-ind');
+  measurePager();
+  var sx, sy, idx, lock, lastX, lastT, vel, curX = 0, raf = 0, pendingX = 0;
 
-  function reset() { swiping = false; lock = null; }
-  window.addEventListener('resize', function() { setTrack(-TAB_ORDER.indexOf(currentTab) * pager.clientWidth, false); fitHeight(); });
+  function reset() { swiping = false; lock = null; if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  function paint() { raf = 0; setTrack(pendingX, 0); }
+  window.addEventListener('resize', function() {
+    measurePager();
+    setTrack(-TAB_ORDER.indexOf(currentTab) * pagerW, 0); fitHeight();
+  });
   if (window.ResizeObserver) {
-    var ro = new ResizeObserver(function() { if (!swiping) fitHeight(); });
+    var ro = new ResizeObserver(function() { if (!swiping && !animating) fitHeight(); });
     for (var i = 0; i < TAB_ORDER.length; i++) ro.observe(document.getElementById('pane-'+TAB_ORDER[i]));
   }
 
@@ -558,7 +627,7 @@ function showTab(name, noAnim) {
     reset();
     if (e.touches.length !== 1) return;
     var t = e.target;
-    if (document.querySelector('.modal-overlay:not(.hidden)')) return; // finestre aperte
+    if (document.querySelector('.modal-overlay:not(.hidden), .sheet-overlay.open')) return; // finestre aperte
     if (t.closest && t.closest('textarea,input[type=range]')) return;
     if (t === document.activeElement && t.tagName === 'INPUT') return; // campo in cui stai scrivendo
     sx = lastX = e.touches[0].clientX; sy = e.touches[0].clientY;
@@ -572,42 +641,54 @@ function showTab(name, noAnim) {
     if (lock === 'pending') {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       if (Math.abs(dx) <= Math.abs(dy)) { lock = null; return; } // scorrimento verticale: lascio fare al browser
-      lock = 'h'; swiping = true;
+      lock = 'h'; swiping = true; animating = false;
       var ae = document.activeElement;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) ae.blur(); // chiude la tastiera
-      idx = TAB_ORDER.indexOf(currentTab); W = pager.clientWidth;
+      idx = TAB_ORDER.indexOf(currentTab);
       clearTimeout(heightTimer);
-      // mostra anche le pagine vicine (già pronte) mentre scorrono
+      // prepara subito le pagine vicine (se servono) e fissa l'altezza una volta sola
       var h = paneH(currentTab);
-      if (idx > 0) h = Math.max(h, paneH(TAB_ORDER[idx-1]));
-      if (idx < TAB_ORDER.length-1) h = Math.max(h, paneH(TAB_ORDER[idx+1]));
+      for (var k = idx - 1; k <= idx + 1; k += 2) {
+        if (k < 0 || k >= TAB_ORDER.length) continue;
+        if (paneStale[TAB_ORDER[k]]) renderPane(TAB_ORDER[k]);
+        h = Math.max(h, paneH(TAB_ORDER[k]));
+      }
       pager.style.height = h + 'px';
+      measurePager();
       sx = x; dx = 0; // parte da dove il dito ha "agganciato"
     }
     if (e.cancelable) e.preventDefault();
     var now = Date.now(), dt = now - lastT;
-    if (dt > 0) vel = 0.7 * ((x - lastX) / dt) + 0.3 * vel;
+    if (dt > 0) vel = 0.6 * ((x - lastX) / dt) + 0.4 * vel;
     lastX = x; lastT = now;
     var off = dx;
     if ((idx === 0 && dx > 0) || (idx === TAB_ORDER.length-1 && dx < 0)) off = dx * 0.3; // resistenza ai bordi
-    setTrack(-idx * W + off, false);
+    curX = -idx * pagerW + off;
+    pendingX = curX;
+    if (!raf) raf = requestAnimationFrame(paint); // un aggiornamento per fotogramma
   }, {passive: false});
 
   function end(cancel) {
     if (!swiping) { reset(); return; }
     var dx = lastX - sx;
-    if (Date.now() - lastT > 120) vel = 0; // dito fermo prima di staccare
+    if (Date.now() - lastT > 100) vel = 0; // dito fermo prima di staccare
     var target = idx;
     if (!cancel) {
-      var reversing = (vel > 0.25 && dx < 0) || (vel < -0.25 && dx > 0);
+      var reversing = (vel > 0.2 && dx < 0) || (vel < -0.2 && dx > 0);
       if (!reversing) {
-        if (dx < 0 && (dx < -W * 0.3 || (vel < -0.4 && dx < -20))) target = idx + 1;
-        if (dx > 0 && (dx >  W * 0.3 || (vel >  0.4 && dx >  20))) target = idx - 1;
+        if (dx < 0 && (dx < -pagerW * 0.3 || (vel < -0.35 && dx < -20))) target = idx + 1;
+        if (dx > 0 && (dx >  pagerW * 0.3 || (vel >  0.35 && dx >  20))) target = idx - 1;
       }
       target = Math.max(0, Math.min(TAB_ORDER.length-1, target));
     }
     reset();
-    showTab(TAB_ORDER[target]);
+    // durata in base a quanto manca e alla velocità del dito: l'animazione continua il gesto senza strappi
+    var remaining = Math.abs(-target * pagerW - curX);
+    var dur = 160 + 240 * (remaining / pagerW);
+    var v = Math.abs(vel);
+    if (v > 0.2) dur = Math.min(dur, 3.6 * remaining / v);
+    dur = Math.round(Math.max(150, Math.min(400, dur)));
+    showTab(TAB_ORDER[target], false, dur);
   }
   document.addEventListener('touchend', function() { end(false); });
   document.addEventListener('touchcancel', function() { end(true); });
@@ -857,11 +938,11 @@ function renderSummary() {
   var maxCat=cats[0][1];
   var catRows='';
   for (var i=0;i<cats.length;i++) {
-    catRows+='<div class="cat-row">'+
+    catRows+='<div class="cat-row clickable" onclick="openCatSheet(\''+esc(jsStr(cats[i][0]))+'\',\''+m+'\')">'+
       '<div class="dot" style="background:'+catColor(cats[i][0])+'"></div>'+
       '<div class="cat-name">'+esc(cats[i][0])+'</div>'+
       '<div class="bar-wrap"><div class="bar-fill" style="width:'+Math.round(cats[i][1]/maxCat*100)+'%"></div></div>'+
-      '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div></div>';
+      '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div><span class="cat-chev">&rsaquo;</span></div>';
   }
   var payRows='';
   for (var i=0;i<pays.length;i++) {
@@ -915,11 +996,11 @@ function renderYearSummary() {
   var maxCat=cats[0][1];
   var catRows='';
   for (var i=0;i<cats.length;i++) {
-    catRows+='<div class="cat-row">'+
+    catRows+='<div class="cat-row clickable" onclick="openCatSheet(\''+esc(jsStr(cats[i][0]))+'\',\''+y+'\')">'+
       '<div class="dot" style="background:'+catColor(cats[i][0])+'"></div>'+
       '<div class="cat-name">'+esc(cats[i][0])+'</div>'+
       '<div class="bar-wrap"><div class="bar-fill" style="width:'+Math.round(cats[i][1]/maxCat*100)+'%"></div></div>'+
-      '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div></div>';
+      '<div class="cat-amt">'+fmtMoney(cats[i][1])+'</div><span class="cat-chev">&rsaquo;</span></div>';
   }
   var payRows='';
   for (var i=0;i<pays.length;i++) {
@@ -938,6 +1019,135 @@ function renderYearSummary() {
     '<div class="card" style="margin-bottom:1rem"><div class="sec-lbl">Per categoria</div>'+catRows+'</div>'+
     '<div class="card" style="margin-bottom:1rem"><div class="sec-lbl">Per metodo di pagamento</div>'+payRows+'</div>';
 }
+
+// --- Pannello dal basso con le spese di una categoria ---
+var catSheet = {open: false, cat: null, period: null};
+
+function periodLabel(p) { return p.length === 7 ? monthLabel(p) : p; }
+
+function renderCatSheet() {
+  var cat = catSheet.cat, p = catSheet.period;
+  var data = expenses.filter(function(e) { return e.cat === cat && e.date.slice(0, p.length) === p; });
+  data.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(b.id-a.id); });
+  var tot = 0;
+  for (var i = 0; i < data.length; i++) tot += data[i].amount;
+  document.getElementById('cs-dot').style.background = catColor(cat);
+  document.getElementById('cs-title').textContent = cat;
+  document.getElementById('cs-tot').textContent = fmtMoney(tot);
+  document.getElementById('cs-sub').textContent = periodLabel(p) + ' · ' + data.length + (data.length === 1 ? ' spesa' : ' spese');
+  var body = document.getElementById('cs-body');
+  if (!data.length) { body.innerHTML = '<div class="empty">Nessuna spesa in questa categoria.</div>'; return; }
+  var rows = '';
+  for (var i = 0; i < data.length; i++) {
+    var e = data[i];
+    rows += '<div class="exp-row" onclick="editFromSheet(' + e.id + ')" style="cursor:pointer">' +
+      '<div class="exp-info">' +
+        '<div class="exp-name">' + esc(e.name) + '</div>' +
+        '<div class="exp-meta">' + fmtDateIT(e.date) + ' &middot; <span class="badge" style="' + payStyle(e.pay) + '">' + esc(e.pay) + '</span></div>' +
+      '</div>' +
+      '<div class="exp-amt">' + fmtMoney(e.amount) + '</div>' +
+    '</div>';
+  }
+  body.innerHTML = '<div class="exp-list">' + rows + '</div>';
+}
+
+function openCatSheet(cat, period) {
+  catSheet.cat = cat; catSheet.period = period;
+  renderCatSheet();
+  var panel = document.getElementById('cs-panel');
+  panel.style.transition = ''; panel.style.transform = '';
+  document.getElementById('cs-backdrop').style.transition = '';
+  document.getElementById('cs-backdrop').style.opacity = '';
+  document.getElementById('cs-body').scrollTop = 0;
+  var ov = document.getElementById('cat-sheet');
+  ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false');
+  document.documentElement.style.overflow = 'hidden'; // blocca lo scorrimento della pagina sotto
+  if (!catSheet.open) {
+    catSheet.open = true;
+    try { history.pushState({catSheet: 1}, ''); } catch (err) {} // il tasto "indietro" di Android chiude il pannello
+  }
+}
+
+function closeCatSheet(fromPop, dur) {
+  if (!catSheet.open) return;
+  catSheet.open = false;
+  var panel = document.getElementById('cs-panel'), bd = document.getElementById('cs-backdrop');
+  // parte dalla posizione attuale (anche a metà trascinamento) e scende fino in fondo
+  panel.style.transition = dur ? 'transform ' + dur + 'ms cubic-bezier(.25,.9,.3,1)' : '';
+  panel.style.transform = '';
+  bd.style.transition = dur ? 'opacity ' + dur + 'ms ease' : '';
+  bd.style.opacity = '';
+  var ov = document.getElementById('cat-sheet');
+  ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true');
+  document.documentElement.style.overflow = '';
+  if (!fromPop && history.state && history.state.catSheet) history.back();
+}
+window.addEventListener('popstate', function() { if (catSheet.open) closeCatSheet(true); });
+
+function editFromSheet(id) { closeCatSheet(); editExpense(id); }
+
+// Trascina verso il basso per chiudere (dalla linea in alto, o dalla lista quando è già in cima)
+(function setupSheetDrag() {
+  var panel = document.getElementById('cs-panel');
+  var body = document.getElementById('cs-body');
+  var bd = document.getElementById('cs-backdrop');
+  var sx, sy, lastY, lastT, vel, mode = null, dragging = false, off = 0, raf = 0, H = 1;
+
+  function paint() {
+    raf = 0;
+    panel.style.transform = 'translate3d(0,' + off + 'px,0)';
+    bd.style.opacity = String(Math.max(0, 1 - Math.max(0, off) / H));
+  }
+
+  panel.addEventListener('touchstart', function(e) {
+    dragging = false; mode = null;
+    if (e.touches.length !== 1) return;
+    sx = e.touches[0].clientX; sy = lastY = e.touches[0].clientY;
+    lastT = Date.now(); vel = 0;
+    if (e.target.closest('.sheet-head')) mode = 'head';
+    else if (body.scrollTop <= 0) mode = 'body';
+  }, {passive: true});
+
+  panel.addEventListener('touchmove', function(e) {
+    if (!mode) return;
+    var x = e.touches[0].clientX, y = e.touches[0].clientY;
+    var dx = x - sx, dy = y - sy;
+    if (!dragging) {
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      // verso l'alto o di lato: normale scorrimento della lista
+      if (Math.abs(dx) > Math.abs(dy) || (mode === 'body' && (dy <= 0 || body.scrollTop > 0))) { mode = null; return; }
+      dragging = true; sy = y; dy = 0;
+      H = panel.offsetHeight || 1;
+      panel.style.transition = 'none'; bd.style.transition = 'none';
+    }
+    if (e.cancelable) e.preventDefault();
+    var now = Date.now(), dt = now - lastT;
+    if (dt > 0) vel = 0.6 * ((y - lastY) / dt) + 0.4 * vel;
+    lastY = y; lastT = now;
+    off = dy < 0 ? dy * 0.2 : dy; // verso l'alto si muove appena (resistenza)
+    if (!raf) raf = requestAnimationFrame(paint);
+  }, {passive: false});
+
+  function end() {
+    if (!dragging) { mode = null; return; }
+    dragging = false; mode = null;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    if (Date.now() - lastT > 100) vel = 0;
+    if (off > H * 0.25 || (vel > 0.45 && off > 15)) {
+      var remaining = H - off;
+      var dur = 140 + 200 * (remaining / H);
+      if (vel > 0.2) dur = Math.min(dur, 3.6 * remaining / vel);
+      closeCatSheet(false, Math.round(Math.max(130, Math.min(340, dur))));
+    } else {
+      panel.style.transition = 'transform .28s cubic-bezier(.25,.9,.3,1)';
+      panel.style.transform = 'translate3d(0,0,0)';
+      bd.style.transition = 'opacity .28s ease'; bd.style.opacity = '';
+    }
+    off = 0;
+  }
+  panel.addEventListener('touchend', end);
+  panel.addEventListener('touchcancel', end);
+})();
 
 function exportMonth(m) {
   var data=expenses.filter(function(e){ return monthKey(e.date)===m; });
